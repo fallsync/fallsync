@@ -1,6 +1,6 @@
 /* FALLSYNC – service worker : fonctionne hors ligne.
    Pour publier une mise à jour, change le numéro de CACHE ci-dessous. */
-const CACHE = 'fallsync-v5-1';
+const CACHE = 'fallsync-v5-3';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './maskable-512.png'];
 
 self.addEventListener('install', e => {

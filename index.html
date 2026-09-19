@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" translate="no">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0a0e17">
+<meta name="google" content="notranslate">
 <meta name="description" content="FALLSYNC : un défi de blocs chaque jour, le même pour tout le monde. Fais glisser les lignes pour combler les trous.">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icon-192.png">
@@ -205,7 +206,7 @@ const I18N = {
     won:'Tu as battu ton ami !', tie:'Égalité !', short:'Il te manque {n} pts',
     themes:'THÈMES', unlockAt:'Série de {n} jours',
     th_classic:'Classique', th_neon:'Néon', th_dune:'Dune', th_night:'Nuit',
-    runOver:'DÉFI TERMINÉ', over:'PARTIE TERMINÉE', newBest:'Nouveau record !', revive:'CONTINUER (pub)',
+    runOver:'DÉFI TERMINÉ', interrupted:'DÉFI INTERROMPU', over:'PARTIE TERMINÉE', newBest:'Nouveau record !', revive:'CONTINUER (pub)',
     again:'REJOUER', restart:'RECOMMENCER', resume:'REPRENDRE', paused:'PAUSE', quit:'TERMINER LE DÉFI',
     shift:'↔ GLISSE', shiftArmed:'CHOISIS UNE LIGNE (annuler)',
     tip:'Glisse : déplacer · Tape : tourner · Bas : chute',
@@ -238,7 +239,7 @@ const I18N = {
     won:'You beat your friend!', tie:'Tie!', short:'You are {n} pts short',
     themes:'THEMES', unlockAt:'{n}-day streak',
     th_classic:'Classic', th_neon:'Neon', th_dune:'Dune', th_night:'Night',
-    runOver:'CHALLENGE COMPLETE', over:'GAME OVER', newBest:'New best!', revive:'CONTINUE (ad)',
+    runOver:'CHALLENGE COMPLETE', interrupted:'CHALLENGE INTERRUPTED', over:'GAME OVER', newBest:'New best!', revive:'CONTINUE (ad)',
     again:'PLAY AGAIN', restart:'RESTART', resume:'RESUME', paused:'PAUSED', quit:'END CHALLENGE',
     shift:'↔ SLIDE', shiftArmed:'PICK A ROW (cancel)',
     tip:'Drag: move · Tap: rotate · Down: drop',
@@ -271,7 +272,7 @@ const I18N = {
     won:'لقد تغلبت على صديقك!', tie:'تعادل!', short:'ينقصك {n} نقطة',
     themes:'المظاهر', unlockAt:'سلسلة {n} أيام',
     th_classic:'كلاسيكي', th_neon:'نيون', th_dune:'كثبان', th_night:'ليل',
-    runOver:'انتهى التحدي', over:'انتهت اللعبة', newBest:'رقم قياسي جديد!', revive:'تابع (إعلان)',
+    runOver:'انتهى التحدي', interrupted:'تم إيقاف التحدي', over:'انتهت اللعبة', newBest:'رقم قياسي جديد!', revive:'تابع (إعلان)',
     again:'العب مجدداً', restart:'إعادة', resume:'متابعة', paused:'إيقاف مؤقت', quit:'إنهاء التحدي',
     shift:'↔ تحريك صف', shiftArmed:'اختر صفاً (إلغاء)',
     tip:'اسحب: تحريك · المس: تدوير · لأسفل: سقوط',
@@ -304,7 +305,7 @@ let shiftCharge = 0, shiftArmed = false, revived = false, shiftedFlag = false;
 let state = 'menu';            // menu | playing | paused | clearing | over
 let mode = 'endless';          // endless | daily | friend
 let rule = RULES.classic, runRule = 'classic', runDate = '', friendTarget = 0;
-let seq = [], seqIdx = 0, trace = [];
+let seq = [], seqIdx = 0, trace = [], attemptPending = false;
 let acc = 0, lockT = 0, lockResets = 0;
 let clearRows = [], clearT = 0;
 let fx = [];
@@ -324,6 +325,20 @@ const t = k => (I18N[lang] && I18N[lang][k]) || I18N.fr[k] || k;
 const tf = (k, v) => t(k).replace(/\{(\w+)\}/g, (m, x) => v[x]);
 const fmt = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 const pad = n => String(n).padStart(2, '0');
+/* ---------- Mesure d'audience (Google Analytics 4) ---------- */
+const GA_ID = 'G-7ZQ2GLB4MK';
+function initAnalytics(){
+  if(!/^G-[A-Z0-9]{6,}$/.test(GA_ID)) return;
+  if(!/^https?:$/.test(location.protocol)) return;          // pas en local (file://)
+  window.dataLayer = window.dataLayer || [];
+  window.gtag = function(){ window.dataLayer.push(arguments); };
+  window.gtag('js', new Date());
+  window.gtag('config', GA_ID, { allow_google_signals: false, allow_ad_personalization_signals: false });
+  const sc = document.createElement('script');
+  sc.async = true;
+  sc.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(GA_ID);
+  document.head.appendChild(sc);
+}
 function track(name, data){ try{ if(window.gtag) window.gtag('event', name, data || {}); }catch(e){} }
 
 /* =========================================================
@@ -559,7 +574,7 @@ function lockPiece(){
       if(cur.shape[y][x]) board[cur.y + y][cur.x + x] = cur.type;
   cur = null;
   sfx('lock');
-  if(mode !== 'endless'){ trace.push({ n: 0, g: shiftedFlag }); shiftedFlag = false; }
+  if(mode !== 'endless'){ if(attemptPending) markAttempt(); trace.push({ n: 0, g: shiftedFlag }); shiftedFlag = false; }
   const rows = fullRows();
   if(rows.length){
     state = 'clearing'; clearRows = rows; clearT = 0;
@@ -656,12 +671,7 @@ function startRun(kind, date, ruleId){
     for(let i = 0; i < pre.length; i++) board[ROWS - pre.length + i] = pre[i];
   }
   shiftCharge = rule.startCharge || 1;
-  if(kind === 'daily'){
-    const prev = results[date];
-    if(!prev) results[date] = { s: 0, l: 0, t: '', r: runRule, a: 1, ip: 1 };
-    else prev.a = (prev.a || 1) + 1;
-    saveResults();
-  }
+  attemptPending = (kind === 'daily');
   state = 'playing'; hideOverlay();
   spawn();
   afterStart(kind);
@@ -680,12 +690,22 @@ function gameOver(){
   dirty = true;
 }
 
+/* Un défi n'est compté qu'à partir de la 1re pièce posée : fermer l'appli par erreur au tout début ne coûte rien */
+function markAttempt(){
+  attemptPending = false;
+  const prev = results[runDate];
+  if(!prev) results[runDate] = { s: 0, l: 0, t: '', r: runRule, a: 1, ip: 1 };
+  else prev.a = (prev.a || 1) + 1;
+  saveResults();
+}
+
 function finishRun(){
   if(state === 'over') return;
   state = 'over'; shiftArmed = false; cur = null;
   const res = { s: score, l: lines, t: trace.map(e => e.n + (e.g ? 4 : 0)).join(''), r: runRule };
   let shown = res;
   if(mode === 'daily'){
+    if(attemptPending) markAttempt();
     const prev = results[runDate];
     const a = prev ? prev.a : 1;
     if(!prev || prev.ip || res.s > prev.s) results[runDate] = { s: res.s, l: res.l, t: res.t, r: res.r, a };
@@ -695,7 +715,8 @@ function finishRun(){
     if(st > maxStreak){ maxStreak = st; store.set('fs_maxstreak', String(st)); }
   }
   sfx('win'); vib([30, 40, 30, 40, 80]);
-  track('finish', { mode, score: res.s });
+  track('finish', { mode, score: res.s, lines: res.l });
+  if(mode === 'daily') track('daily_complete', { score: shown.s, streak: computeStreak(), rule: runRule });
   updateHud(); updateShiftUI(); setTip();
   showOverlay('result', { k: mode, date: runDate, res: shown, target: friendTarget });
   if(mode === 'friend'){
@@ -1031,7 +1052,7 @@ function menuHTML(langBtn, sndBtn){
   h += '<div class="card"><div class="top"><b>' + t('challenge') + ' #' + n + '</b><span class="streak">🔥 ' + streak + '</span></div>';
   h += '<div class="rule">' + (r === 'classic' ? t('rd_classic') : '<b>' + t('rn_' + r) + '</b> — ' + t('rd_' + r)) + '</div>';
   h += res
-    ? '<div class="meta">' + t('yourScore') + ' : <b>' + fmt(res.s) + '</b> · ' + t('nextIn') + ' <b id="cd">' + cdText() + '</b></div>'
+    ? '<div class="meta">' + (res.ip ? t('interrupted') : t('yourScore') + ' : <b>' + fmt(res.s) + '</b>') + ' · ' + t('nextIn') + ' <b id="cd">' + cdText() + '</b></div>'
     : '<div class="meta">' + DAILY_N + ' ' + t('piecesWord') + ' · ' + t('oneTry') + '</div>';
   h += '</div>';
   h += '<button class="btn" data-act="' + (res ? 'viewres' : 'daily') + '">' + (res ? t('viewResult') : t('playDaily')) + '</button>';
@@ -1044,6 +1065,14 @@ function menuHTML(langBtn, sndBtn){
 function resultHTML(langBtn, sndBtn){
   const d = ovData, res = d.res, k = d.k;
   const streak = computeStreak();
+  if(res.ip){
+    lastShare = '';
+    return '<div class="title">' + t('interrupted') + '</div>' +
+      '<div class="best">' + t('challenge') + ' #' + dayNum(d.date) + '</div>' +
+      '<div class="best">' + t('nextIn') + ' <b id="cd">' + cdText() + '</b></div>' +
+      ((results[d.date].a || 1) < 2 ? '<button class="btn" data-act="retry">' + t('retry') + '</button>' : '') +
+      '<div class="row"><button class="btn alt" data-act="practice">' + t('practice') + '</button><button class="btn alt" data-act="menu">' + t('menuBtn') + '</button></div>';
+  }
   let h = '<div class="title">' + t('runOver') + '</div>';
   h += '<div class="best" style="margin-bottom:2px">' + t('challenge') + ' #' + dayNum(d.date) + (k === 'friend' ? ' · ' + t('friendMode') : '') +
        (res.r && res.r !== 'classic' ? ' · ' + t('rn_' + res.r) : '') + '</div>';
@@ -1151,7 +1180,7 @@ $('ovBox').addEventListener('click', async e => {
     case 'themes': showOverlay('themes', {}); break;
     case 'theme': {
       const id = b.dataset.id;
-      if(THEMES[id] && maxStreak >= THEMES[id].req){ applyTheme(id); showOverlay('themes', {}); }
+      if(THEMES[id] && maxStreak >= THEMES[id].req){ applyTheme(id); track('theme', { id }); showOverlay('themes', {}); }
       else { vib(20); sfx('err'); }
       break;
     }
@@ -1314,7 +1343,7 @@ window.addEventListener('beforeinstallprompt', e => {
   e.preventDefault(); deferredPrompt = e;
   if(overlayVisible() && ovKind === 'menu') showOverlay('menu');
 });
-window.addEventListener('appinstalled', () => { deferredPrompt = null; });
+window.addEventListener('appinstalled', () => { deferredPrompt = null; track('pwa_install'); });
 
 /* Compte à rebours + changement de jour */
 setInterval(() => {
@@ -1367,6 +1396,7 @@ goMenu();
 resize();
 requestAnimationFrame(frame);
 loadRules();
+initAnalytics();
 </script>
 </body>
 </html>
