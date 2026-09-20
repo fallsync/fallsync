@@ -6,6 +6,14 @@
 <meta name="theme-color" content="#0a0e17">
 <meta name="google" content="notranslate">
 <meta name="description" content="FALLSYNC : un défi de blocs chaque jour, le même pour tout le monde. Fais glisser les lignes pour combler les trous.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="FALLSYNC">
+<meta property="og:description" content="Un défi de blocs chaque jour, le même pour tout le monde. Fais glisser les lignes pour combler les trous.">
+<meta property="og:url" content="https://fallsync.github.io/fallsync/">
+<meta property="og:image" content="https://fallsync.github.io/fallsync/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -191,6 +199,7 @@ const I18N = {
     how3:'<b>Glisse vers le bas</b> : chute rapide',
     how4:'<b>GLISSE</b> : décale une ligne entière. Les blocs qui sortent reviennent de l’autre côté.',
     helpTitle:'COMMENT JOUER',
+    privacy:'Ce jeu utilise Google Analytics pour recueillir des statistiques anonymes (parties jouées, scores, langue) et s\'améliorer. Aucun nom ni e-mail n\'est demandé et la personnalisation publicitaire est désactivée. Ta progression est enregistrée sur ton appareil.',
     helpDaily:'Chaque jour, le même défi pour tout le monde : 20 pièces, un seul essai. Reviens demain pour garder ta série !',
     startGo:'C’EST PARTI', ok:'OK',
     challenge:'Défi', playDaily:'JOUER LE DÉFI', viewResult:'VOIR MON RÉSULTAT', practice:'ENTRAÎNEMENT',
@@ -224,6 +233,7 @@ const I18N = {
     how3:'<b>Swipe down</b>: fast drop',
     how4:'<b>SLIDE</b>: shifts a whole row. Blocks pushed off one side come back on the other.',
     helpTitle:'HOW TO PLAY',
+    privacy:'This game uses Google Analytics to collect anonymous statistics (games played, scores, language) so it can improve. No name or email is requested and ad personalization is turned off. Your progress is saved on your device.',
     helpDaily:'Every day, the same challenge for everyone: 20 pieces, one try. Come back tomorrow to keep your streak!',
     startGo:'LET’S GO', ok:'OK',
     challenge:'Challenge', playDaily:'PLAY CHALLENGE', viewResult:'VIEW MY RESULT', practice:'PRACTICE',
@@ -257,6 +267,7 @@ const I18N = {
     how3:'<b>اسحب للأسفل</b>: سقوط سريع',
     how4:'<b>تحريك</b>: يزيح صفاً كاملاً، والقطع الخارجة تعود من الجهة الأخرى.',
     helpTitle:'طريقة اللعب',
+    privacy:'تستخدم هذه اللعبة خدمة Google Analytics لجمع إحصائيات مجهولة (عدد الألعاب والنتائج واللغة) بهدف التحسين. لا نطلب اسمك ولا بريدك الإلكتروني، والإعلانات المخصصة معطّلة. يتم حفظ تقدّمك على جهازك.',
     helpDaily:'كل يوم تحدٍّ واحد للجميع: 20 قطعة ومحاولة واحدة. عد غداً للحفاظ على سلسلتك!',
     startGo:'هيا بنا', ok:'حسناً',
     challenge:'التحدي', playDaily:'العب التحدي', viewResult:'عرض نتيجتي', practice:'تدريب',
@@ -431,7 +442,7 @@ function traceGrid(str){
   return out.replace(/\n$/, '');
 }
 function challengeUrl(date, res){
-  return location.href.split('#')[0].replace(/index\.html$/, '') + '#c=' + date + '.' + res.s + '.' + res.r;
+  return location.origin + location.pathname.replace(/index\.html$/, '') + '?utm_source=share&utm_medium=result#c=' + date + '.' + res.s + '.' + res.r;
 }
 function shareText(date, res, withStreak){
   let s = 'FALLSYNC #' + dayNum(date) + ' · ' + fmt(res.s) + ' ' + t('pts') + '\n' + traceGrid(res.t) + '\n';
@@ -578,7 +589,7 @@ function lockPiece(){
   const rows = fullRows();
   if(rows.length){
     state = 'clearing'; clearRows = rows; clearT = 0;
-    sfx('clear', rows.length); vib(rows.length > 1 ? [20, 30, 40] : 20);
+    sfx('clear', rows.length, combo + 1); vib(rows.length > 1 ? [20, 30, 40] : 20);
   } else {
     combo = 0;
     spawn();
@@ -1122,6 +1133,7 @@ function showOverlay(kind, data){
     h = '<div class="title">' + t('helpTitle') + '</div>' +
         '<ul class="how"><li>' + t('how1') + '</li><li>' + t('how2') + '</li><li>' + t('how3') + '</li><li>' + t('how4') + '</li></ul>' +
         '<p class="sub">' + t('helpDaily') + '</p>' +
+        '<p class="sub" style="font-size:11px;opacity:.7">' + t('privacy') + '</p>' +
         '<button class="btn" data-act="' + (ovData.then ? 'helpgo' : 'menu') + '">' + (ovData.then ? t('startGo') : t('ok')) + '</button>';
   } else if(kind === 'pause'){
     h = '<div class="title">' + t('paused') + '</div>' +
@@ -1207,16 +1219,23 @@ $('ovBox').addEventListener('click', async e => {
 /* =========================================================
    AUDIO + VIBRATION
    ========================================================= */
-let AC = null;
+let AC = null, MASTER = null;
 function ensureAudio(){
   try{
     if(!AC){
       const C = window.AudioContext || window.webkitAudioContext;
-      if(C) AC = new C();
+      if(C){
+        AC = new C();
+        /* chaîne master : gain + compresseur, pour des sons plus forts sans saturation */
+        MASTER = AC.createGain(); MASTER.gain.value = 1.15;
+        const comp = AC.createDynamicsCompressor();
+        MASTER.connect(comp); comp.connect(AC.destination);
+      }
     }
     if(AC && AC.state === 'suspended') AC.resume();
   }catch(e){}
 }
+function out(){ return MASTER || AC.destination; }
 function tone(f, d, type, vol, slide, delay){
   if(muted || !AC) return;
   try{
@@ -1225,27 +1244,52 @@ function tone(f, d, type, vol, slide, delay){
     o.type = type || 'triangle';
     o.frequency.setValueAtTime(f, t0);
     if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, f + slide), t0 + d);
-    g.gain.setValueAtTime(vol || .05, t0);
+    g.gain.setValueAtTime(vol || .08, t0);
     g.gain.exponentialRampToValueAtTime(.0008, t0 + d);
-    o.connect(g); g.connect(AC.destination);
+    o.connect(g); g.connect(out());
     o.start(t0); o.stop(t0 + d + .02);
   }catch(e){}
 }
-function sfx(name, n){
+/* bruit filtré : sert aux « chocs » (chute, pose) et au « whoosh » de la glisse */
+function noise(d, vol, delay, freq){
+  if(muted || !AC) return;
+  try{
+    const len = Math.max(1, Math.floor(AC.sampleRate * d));
+    const buf = AC.createBuffer(1, len, AC.sampleRate), data = buf.getChannelData(0);
+    for(let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    const src = AC.createBufferSource(); src.buffer = buf;
+    const flt = AC.createBiquadFilter(); flt.type = 'lowpass'; flt.frequency.value = freq || 900;
+    const g = AC.createGain(); const t0 = AC.currentTime + (delay || 0);
+    g.gain.setValueAtTime(vol || .08, t0);
+    g.gain.exponentialRampToValueAtTime(.0008, t0 + d);
+    src.connect(flt); flt.connect(g); g.connect(out());
+    src.start(t0);
+  }catch(e){}
+}
+function sfx(name, n, c){
   switch(name){
-    case 'move': tone(300, .04, 'sine', .03); break;
-    case 'rot':  tone(520, .05, 'triangle', .04); break;
-    case 'drop': tone(140, .09, 'sine', .07, -60); break;
-    case 'lock': tone(180, .06, 'sine', .05); break;
-    case 'clear':
-      for(let i = 0; i < Math.min(4, (n || 1) + 1); i++) tone(520 + i * 130, .12, 'triangle', .05, 0, i * .07);
+    case 'move': tone(340, .035, 'sine', .06); break;
+    case 'rot':  tone(520, .05, 'triangle', .09); tone(780, .04, 'sine', .04, 0, .02); break;
+    case 'drop': noise(.08, .16, 0, 700); tone(150, .1, 'sine', .14, -70); break;
+    case 'lock': tone(190, .07, 'sine', .11); noise(.04, .06, 0, 1200); break;
+    case 'clear': {
+      /* la hauteur monte à chaque combo consécutif : plus on enchaîne, plus c'est satisfaisant */
+      const base = 440 * Math.pow(2, (Math.min(c || 1, 7) - 1) * 2 / 12);
+      const notes = [1, 1.25, 1.5, 2];
+      const k = Math.min(4, (n || 1) + 1);
+      for(let i = 0; i < k; i++){
+        tone(base * notes[i], .16, 'triangle', .12, 0, i * .06);
+        tone(base * notes[i] * 2, .2, 'sine', .04, 0, i * .06);
+      }
+      if((n || 1) >= 3) [1760, 2093, 2637].forEach((f, i) => tone(f, .22, 'sine', .05, 0, .28 + i * .06));
       break;
-    case 'shift': tone(300, .16, 'square', .03, 420); break;
-    case 'arm':   tone(660, .07, 'triangle', .04); break;
-    case 'err':   tone(120, .12, 'square', .03); break;
-    case 'level': tone(660, .1, 'triangle', .05, 0, .1); tone(880, .16, 'triangle', .05, 0, .2); break;
-    case 'win':   [523, 659, 784, 1047].forEach((f, i) => tone(f, .16, 'triangle', .05, 0, i * .1)); break;
-    case 'over':  tone(300, .35, 'sawtooth', .04, -220); break;
+    }
+    case 'shift': noise(.14, .07, 0, 2200); tone(300, .16, 'square', .045, 420); break;
+    case 'arm':   tone(660, .07, 'triangle', .09); tone(990, .06, 'sine', .04, 0, .04); break;
+    case 'err':   tone(140, .12, 'square', .05); break;
+    case 'level': [523, 659, 784, 1047].forEach((f, i) => tone(f, .14, 'triangle', .11, 0, .1 + i * .07)); break;
+    case 'win':   [523, 659, 784, 1047, 1319].forEach((f, i) => { tone(f, .2, 'triangle', .11, 0, i * .1); tone(f * 2, .24, 'sine', .04, 0, i * .1); }); break;
+    case 'over':  tone(300, .4, 'sawtooth', .07, -220); tone(150, .45, 'sine', .08, -60); break;
   }
 }
 function vib(p){ if(!muted && navigator.vibrate) try{ navigator.vibrate(p); }catch(e){} }
